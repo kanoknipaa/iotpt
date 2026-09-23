@@ -41,7 +41,7 @@ const char* AP_PASSWORD = "12345678";
 // Google Apps Script URL
 // =====================================================
 const char* GOOGLE_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbyLIPfKuIf-ExrEv4HMXMVC_vG3jnoaOA9b6yVVd0o6G8ALL0pnLYQMIieq3VL6Laam/exec";
+  "https://script.google.com/macros/s/AKfycbxE2f8pE1qio1b41KINpgkv2xXlx_QNVErzvzdko_PoosjVDmW3zzTEcagx2Jt0dWwD/exec";
 
 // =====================================================
 // Web Server
