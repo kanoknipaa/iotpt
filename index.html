@@ -134,7 +134,7 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 2;
-  transition: 0.4s;
+  transition: 0.3s;
 }
 
 /* =================================================
@@ -180,19 +180,17 @@ body {
 }
 
 /* =================================================
-   CAR ENTER & EXIT ANIMATIONS
+   CAR ENTER & EXIT ANIMATIONS (ปรับสปีดให้ไวทันใจ)
 ================================================= */
 .car-enter {
   left: -100px;
   top: 50%;
   transform: translateY(-50%) scaleX(-1);
-  animation: carEnter 2.2s cubic-bezier(.22,.61,.36,1) forwards;
+  animation: carEnter 0.5s cubic-bezier(.22,.61,.36,1) forwards;
 }
 
 @keyframes carEnter {
   0% { left: -100px; transform: translateY(-50%) scaleX(-1); }
-  65% { left: 42%; transform: translateY(-50%) scaleX(-1); }
-  82% { left: 48%; transform: translateY(-50%) scaleX(-1); }
   100% { left: 50%; transform: translate(-50%, -50%) scaleX(-1); }
 }
 
@@ -206,12 +204,11 @@ body {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  animation: carExit 1.8s cubic-bezier(.55,.08,.68,.53) forwards;
+  animation: carExit 0.4s cubic-bezier(.55,.08,.68,.53) forwards;
 }
 
 @keyframes carExit {
   0% { left: 50%; transform: translate(-50%, -50%) scaleX(-1); }
-  30% { left: 55%; transform: translate(-50%, -50%) scaleX(-1); }
   100% { left: calc(100% + 100px); transform: translateY(-50%) scaleX(-1); }
 }
 
@@ -310,11 +307,11 @@ body {
 }
 
 .status-main.changed {
-  animation: statusPop 0.5s ease;
+  animation: statusPop 0.3s ease;
 }
 
 @keyframes statusPop {
-  0% { transform: scale(0.8); opacity: 0.3; }
+  0% { transform: scale(0.9); opacity: 0.5; }
   100% { transform: scale(1); opacity: 1; }
 }
 
@@ -440,7 +437,7 @@ function carEnterParking() {
   clearTimeout(animationTimer);
   animationTimer = setTimeout(() => {
     car.className = "parking-car car-parked";
-  }, 2200);
+  }, 500); // เล่น Animation ให้จบใน 0.5 วินาที
 }
 
 function carExitParking() {
@@ -451,7 +448,7 @@ function carExitParking() {
     animationTimer = setTimeout(() => {
       car.remove();
       showEmptySlot();
-    }, 1800);
+    }, 400); // เล่น Animation ออกจบใน 0.4 วินาที
   } else {
     showEmptySlot();
   }
@@ -551,7 +548,7 @@ async function fetchData() {
 }
 
 fetchData();
-setInterval(fetchData, 1000); // อัปเดตข้อมูลทุก 1 วินาที
+setInterval(fetchData, 800); // เช็กข้อมูลทุกๆ 0.8 วินาที (ตอบสนองไวขึ้น)
 </script>
 
 </body>
