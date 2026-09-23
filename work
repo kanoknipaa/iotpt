@@ -1211,7 +1211,7 @@ body {
   </p>
 
   <div class="connection">
-    🟢 ESP32 ONLINE
+    🟢 ESP32 ONLINE • LOCAL
   </div>
 
 </div>
@@ -1435,9 +1435,9 @@ body {
 
   ESP32 Smart Parking System<br>
 
-  Dashboard อัปเดตแบบ Real-time<br>
+  Local Dashboard อัปเดตแบบ Real-time<br>
 
-  Google Sheets บันทึกข้อมูลทุก 10 วินาที
+  Google Sheets บันทึกข้อมูลทุก 10 วินาที<br>Public Dashboard: GitHub Pages
 
 </div>
 
@@ -2055,7 +2055,7 @@ void loop()
 
   if (d < 0)
   {
-    parkingStatus = "No Echo";
+    parkingStatus = "ไม่ทราบสถานะ";
 
     occupiedSlots = 0;
 
