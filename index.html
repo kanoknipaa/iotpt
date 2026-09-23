@@ -1,52 +1,558 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Parking Dashboard</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background: #f0f2f5; padding: 40px 20px; }
-        .card { background: white; max-width: 400px; margin: 0 auto; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        .status-box { font-size: 28px; font-weight: bold; margin: 20px 0; padding: 15px; border-radius: 10px; }
-        .occupied { background-color: #ffebee; color: #c62828; }
-        .available { background-color: #e8f5e9; color: #2e7d32; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Parking System</title>
+
+<style>
+/* =================================================
+   GLOBAL
+================================================= */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, "Noto Sans Thai", sans-serif;
+  background: linear-gradient(135deg, #0f172a, #1e293b);
+  color: white;
+  min-height: 100vh;
+}
+
+/* =================================================
+   MAIN CONTAINER
+================================================= */
+.container {
+  width: 92%;
+  max-width: 900px;
+  margin: auto;
+  padding: 25px 0 40px;
+}
+
+/* =================================================
+   HEADER
+================================================= */
+.header {
+  text-align: center;
+  padding: 15px;
+  margin-bottom: 20px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 30px;
+  letter-spacing: 1px;
+}
+
+.header p {
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 15px;
+}
+
+/* =================================================
+   CONNECTION STATUS
+================================================= */
+.connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 7px 14px;
+  border-radius: 50px;
+  background: rgba(34,197,94,0.12);
+  color: #4ade80;
+  font-size: 13px;
+}
+
+/* =================================================
+   CARD
+================================================= */
+.card {
+  background: #1e293b;
+  border-radius: 20px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+
+/* =================================================
+   SECTION TITLE
+================================================= */
+.section-title {
+  font-size: 18px;
+  font-weight: bold;
+  color: #e2e8f0;
+  margin-bottom: 20px;
+}
+
+/* =================================================
+   PARKING LOT
+================================================= */
+.parking-lot {
+  position: relative;
+  min-height: 270px;
+  border-radius: 15px;
+  padding: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: repeating-linear-gradient(
+    90deg,
+    #334155 0px,
+    #334155 55px,
+    #3b4759 55px,
+    #3b4759 57px
+  );
+}
+
+/* =================================================
+   ROAD
+================================================= */
+.road-line {
+  position: absolute;
+  top: 20px;
+  bottom: 20px;
+  left: 50%;
+  border-left: 3px dashed rgba(255,255,255,0.35);
+}
+
+/* =================================================
+   PARKING SLOT
+================================================= */
+.parking-slot {
+  position: relative;
+  width: 240px;
+  height: 190px;
+  border: 4px dashed white;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  transition: 0.4s;
+}
+
+/* =================================================
+   AVAILABLE / OCCUPIED / UNKNOWN
+================================================= */
+.parking-slot.available {
+  background: rgba(34,197,94,0.15);
+  border-color: #22c55e;
+  box-shadow: 0 0 30px rgba(34,197,94,0.25);
+}
+
+.parking-slot.occupied {
+  background: rgba(239,68,68,0.20);
+  border-color: #ef4444;
+  box-shadow: 0 0 30px rgba(239,68,68,0.30);
+}
+
+.parking-slot.unknown {
+  background: rgba(100,116,139,0.15);
+  border-color: #64748b;
+}
+
+.slot-number {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #cbd5e1;
+}
+
+.parking-symbol {
+  font-size: 65px;
+  line-height: 1;
+}
+
+.parking-car {
+  position: absolute;
+  font-size: 65px;
+  line-height: 1;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* =================================================
+   CAR ENTER & EXIT ANIMATIONS
+================================================= */
+.car-enter {
+  left: -100px;
+  top: 50%;
+  transform: translateY(-50%) scaleX(-1);
+  animation: carEnter 2.2s cubic-bezier(.22,.61,.36,1) forwards;
+}
+
+@keyframes carEnter {
+  0% { left: -100px; transform: translateY(-50%) scaleX(-1); }
+  65% { left: 42%; transform: translateY(-50%) scaleX(-1); }
+  82% { left: 48%; transform: translateY(-50%) scaleX(-1); }
+  100% { left: 50%; transform: translate(-50%, -50%) scaleX(-1); }
+}
+
+.car-parked {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.car-exit {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  animation: carExit 1.8s cubic-bezier(.55,.08,.68,.53) forwards;
+}
+
+@keyframes carExit {
+  0% { left: 50%; transform: translate(-50%, -50%) scaleX(-1); }
+  30% { left: 55%; transform: translate(-50%, -50%) scaleX(-1); }
+  100% { left: calc(100% + 100px); transform: translateY(-50%) scaleX(-1); }
+}
+
+.slot-status {
+  font-size: 18px;
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+/* =================================================
+   STATISTICS & STATUS CARDS
+================================================= */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: #1e293b;
+  border-radius: 18px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.20);
+}
+
+.stat-icon { font-size: 30px; margin-bottom: 8px; }
+.stat-number { font-size: 32px; font-weight: bold; margin: 5px 0; }
+.stat-label { color: #94a3b8; font-size: 14px; }
+
+.status-card {
+  background: #1e293b;
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.20);
+}
+
+.status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.status-title { font-size: 18px; color: #cbd5e1; }
+.status-badge {
+  padding: 8px 15px;
+  border-radius: 50px;
+  font-weight: bold;
+  color: white;
+  transition: 0.3s;
+}
+
+.status-badge.occupied { background: #ef4444; }
+.status-badge.available { background: #22c55e; }
+.status-badge.unknown { background: #64748b; }
+
+.status-main { font-size: 26px; font-weight: bold; margin-bottom: 18px; }
+
+.distance-box {
+  background: #0f172a;
+  border-radius: 12px;
+  padding: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.distance-label { color: #94a3b8; font-size: 14px; }
+.distance-value { font-size: 25px; font-weight: bold; }
+
+.wifi-info {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}
+
+.wifi-box {
+  background: #0f172a;
+  padding: 15px;
+  border-radius: 12px;
+}
+
+.wifi-label { color: #64748b; font-size: 12px; margin-bottom: 5px; }
+.wifi-value { color: #e2e8f0; font-weight: bold; word-break: break-word; }
+
+.footer {
+  text-align: center;
+  color: #64748b;
+  font-size: 12px;
+  margin-top: 25px;
+  line-height: 1.7;
+}
+
+.status-main.changed {
+  animation: statusPop 0.5s ease;
+}
+
+@keyframes statusPop {
+  0% { transform: scale(0.8); opacity: 0.3; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@media (max-width: 600px) {
+  .container { width: 94%; }
+  .header h1 { font-size: 23px; }
+  .stats { grid-template-columns: 1fr; }
+  .parking-slot { width: 200px; height: 165px; }
+  .parking-car, .parking-symbol { font-size: 52px; }
+  .wifi-info { grid-template-columns: 1fr; }
+  .status-header { flex-direction: column; align-items: flex-start; }
+}
+</style>
 </head>
+
 <body>
 
-    <div class="card">
-        <h2>🚗 สถานะลานจอดรถ</h2>
-        <div id="status-box" class="status-box">กำลังโหลด...</div>
-        <p>ระยะทางล่าสุด: <strong id="distance-text">-</strong> ซม.</p>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>🚗 SMART PARKING SYSTEM</h1>
+    <p>ระบบตรวจสอบพื้นที่จอดรถอัจฉริยะ</p>
+    <div class="connection">
+      🟢 LIVE • GOOGLE SHEETS CLOUD
     </div>
+  </div>
 
-    <script>
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxE2f8pE1qio1b41KINpgkv2xXlx_QNVErzvzdko_PoosjVDmW3zzTEcagx2Jt0dWwD/exec";
+  <!-- PARKING AREA -->
+  <div class="card">
+    <div class="section-title">🅿️ สถานะพื้นที่จอดรถ</div>
+    <div class="parking-lot" id="parkingLot">
+      <div class="road-line"></div>
+      <div class="parking-slot available" id="parkingSlot">
+        <div class="slot-number">SLOT 01</div>
+        <div class="parking-symbol" id="parkingSymbol">🅿️</div>
+        <div class="slot-status" id="slotStatus">ช่องว่าง</div>
+      </div>
+    </div>
+  </div>
 
-        async function updateDashboard() {
-            try {
-                const response = await fetch(GOOGLE_SCRIPT_URL);
-                const data = await response.json();
+  <!-- STATISTICS -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-icon">🚗</div>
+      <div class="stat-number" id="occupiedCount">0</div>
+      <div class="stat-label">รถที่จอด</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🅿️</div>
+      <div class="stat-number" id="availableCount">1</div>
+      <div class="stat-label">ช่องว่าง</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">📊</div>
+      <div class="stat-number" id="totalCount">1</div>
+      <div class="stat-label">ช่องทั้งหมด</div>
+    </div>
+  </div>
 
-                const statusBox = document.getElementById('status-box');
-                const distanceText = document.getElementById('distance-text');
+  <!-- CURRENT STATUS -->
+  <div class="status-card">
+    <div class="status-header">
+      <div class="status-title">📡 สถานะปัจจุบัน</div>
+      <div class="status-badge available" id="statusBadge">🅿️ ช่องว่าง</div>
+    </div>
+    <div class="status-main" id="statusMain">ช่องว่าง</div>
+    <div class="distance-box">
+      <div><div class="distance-label">ระยะห่างจากเซนเซอร์</div></div>
+      <div class="distance-value" id="distanceValue">--</div>
+    </div>
+  </div>
 
-                distanceText.innerText = data.distance;
+  <!-- CONNECTION INFORMATION -->
+  <div class="card">
+    <div class="section-title">📡 ข้อมูลการเชื่อมต่อ</div>
+    <div class="wifi-info">
+      <div class="wifi-box">
+        <div class="wifi-label">Wi-Fi Access Point</div>
+        <div class="wifi-value">ctd_eiei</div>
+      </div>
+      <div class="wifi-box">
+        <div class="wifi-label">Data Source</div>
+        <div class="wifi-value">Google Sheets Web API</div>
+      </div>
+    </div>
+  </div>
 
-                if (data.status === 'occupied' || data.status === 'มีรถ') {
-                    statusBox.innerText = "❌ มีรถจอดอยู่";
-                    statusBox.className = "status-box occupied";
-                } else {
-                    statusBox.innerText = "✅ ช่องจอดว่าง";
-                    statusBox.className = "status-box available";
-                }
-            } catch (error) {
-                console.error("Error fetching data:", error);
-            }
-        }
+  <!-- FOOTER -->
+  <div class="footer">
+    ESP32 Smart Parking System<br>
+    Cloud Dashboard อัปเดตผ่าน Google Sheets<br>
+    Public Dashboard: GitHub Pages
+  </div>
 
-        setInterval(updateDashboard, 3000);
-        updateDashboard();
-    </script>
+</div>
+
+<script>
+// =====================================================
+// Google Apps Script URL
+// =====================================================
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyLIPfKuIf-ExrEv4HMXMVC_vG3jnoaOA9b6yVVd0o6G8ALL0pnLYQMIieq3VL6Laam/exec";
+
+let lastStatus = null;
+let animationTimer = null;
+
+function carEnterParking() {
+  const lot = document.getElementById("parkingLot");
+  const slot = document.getElementById("parkingSlot");
+  const oldCar = document.getElementById("animatedCar");
+  if (oldCar) oldCar.remove();
+
+  slot.className = "parking-slot occupied";
+  document.getElementById("parkingSymbol").style.display = "none";
+  document.getElementById("slotStatus").innerText = "มีรถ";
+
+  const car = document.createElement("div");
+  car.id = "animatedCar";
+  car.className = "parking-car car-enter";
+  car.innerText = "🚗";
+  lot.appendChild(car);
+
+  clearTimeout(animationTimer);
+  animationTimer = setTimeout(() => {
+    car.className = "parking-car car-parked";
+  }, 2200);
+}
+
+function carExitParking() {
+  const car = document.getElementById("animatedCar");
+  if (car) {
+    car.className = "parking-car car-exit";
+    clearTimeout(animationTimer);
+    animationTimer = setTimeout(() => {
+      car.remove();
+      showEmptySlot();
+    }, 1800);
+  } else {
+    showEmptySlot();
+  }
+}
+
+function showEmptySlot() {
+  const slot = document.getElementById("parkingSlot");
+  slot.className = "parking-slot available";
+  const symbol = document.getElementById("parkingSymbol");
+  symbol.style.display = "block";
+  symbol.innerText = "🅿️";
+  document.getElementById("slotStatus").innerText = "ช่องว่าง";
+}
+
+function showUnknownSlot() {
+  const car = document.getElementById("animatedCar");
+  if (car) car.remove();
+  const slot = document.getElementById("parkingSlot");
+  slot.className = "parking-slot unknown";
+  const symbol = document.getElementById("parkingSymbol");
+  symbol.style.display = "block";
+  symbol.innerText = "⚠️";
+  document.getElementById("slotStatus").innerText = "ไม่ทราบสถานะ";
+}
+
+function updateDashboard(data) {
+  const status = data.status;
+  const distance = document.getElementById("distanceValue");
+
+  if (data.distance === null || data.distance === undefined) {
+    distance.innerText = "--";
+  } else {
+    distance.innerText = Number(data.distance).toFixed(2) + " cm";
+  }
+
+  // คำนวณจำนวนช่องว่าง/มีรถ
+  let isOccupied = (status === "occupied" || status === "มีรถ");
+  let isAvailable = (status === "available" || status === "ช่องว่าง");
+
+  document.getElementById("occupiedCount").innerText = isOccupied ? 1 : 0;
+  document.getElementById("availableCount").innerText = isAvailable ? 1 : 0;
+  document.getElementById("totalCount").innerText = 1;
+
+  const badge = document.getElementById("statusBadge");
+  const main = document.getElementById("statusMain");
+
+  if (isOccupied) {
+    badge.className = "status-badge occupied";
+    badge.innerText = "🚗 มีรถ";
+    main.innerText = "มีรถ";
+  } else if (isAvailable) {
+    badge.className = "status-badge available";
+    badge.innerText = "🅿️ ช่องว่าง";
+    main.innerText = "ช่องว่าง";
+  } else {
+    badge.className = "status-badge unknown";
+    badge.innerText = "⚠️ ไม่ทราบสถานะ";
+    main.innerText = "ไม่สามารถอ่านค่าได้";
+  }
+
+  // แอนิเมชันรถวิ่ง
+  const normStatus = isOccupied ? "occupied" : (isAvailable ? "available" : "unknown");
+
+  if (lastStatus !== null) {
+    if (lastStatus === "available" && normStatus === "occupied") {
+      carEnterParking();
+    } else if (lastStatus === "occupied" && normStatus === "available") {
+      carExitParking();
+    } else if (normStatus === "unknown") {
+      showUnknownSlot();
+    }
+  } else {
+    if (normStatus === "occupied") carEnterParking();
+    else if (normStatus === "available") showEmptySlot();
+    else showUnknownSlot();
+  }
+
+  if (lastStatus !== normStatus) {
+    main.classList.remove("changed");
+    void main.offsetWidth;
+    main.classList.add("changed");
+  }
+
+  lastStatus = normStatus;
+}
+
+// ดึงข้อมูลจาก Google Sheets
+async function fetchData() {
+  try {
+    const response = await fetch(GOOGLE_SCRIPT_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error("Server Error");
+    const data = await response.json();
+    updateDashboard(data);
+  } catch (error) {
+    console.log("กำลังรอข้อมูลจาก Google Sheets...");
+  }
+}
+
+fetchData();
+setInterval(fetchData, 2000); // อัปเดตข้อมูลทุก 2 วินาที
+</script>
+
 </body>
 </html>
