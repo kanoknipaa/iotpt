@@ -1,0 +1,2176 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
+
+// =====================================================
+// Ultrasonic
+// =====================================================
+#define TRIG_PIN 5
+#define ECHO_PIN 18
+
+// =====================================================
+// LED
+// =====================================================
+#define LED_BLUE 25
+#define LED_RED  26
+
+// =====================================================
+// ระยะที่ถือว่ามีรถ
+// =====================================================
+#define CAR_DISTANCE 30
+
+// =====================================================
+// จำนวนช่องจอดรถ
+// ตอนนี้มี Ultrasonic 1 ตัว = 1 ช่อง
+// =====================================================
+#define TOTAL_SLOTS 1
+
+// =====================================================
+// Wi-Fi สำหรับ Internet
+// =====================================================
+const char* WIFI_SSID = "Galaxy A14 D2FA";
+const char* WIFI_PASSWORD = "12345678";
+
+// =====================================================
+// Wi-Fi ที่ ESP32 ปล่อยให้เครื่องอื่นเกาะ
+// =====================================================
+const char* AP_SSID = "ctd_eiei";
+const char* AP_PASSWORD = "12345678";
+
+// =====================================================
+// Google Apps Script URL
+// =====================================================
+const char* GOOGLE_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbyLIPfKuIf-ExrEv4HMXMVC_vG3jnoaOA9b6yVVd0o6G8ALL0pnLYQMIieq3VL6Laam/exec";
+
+// =====================================================
+// Web Server
+// =====================================================
+WebServer server(80);
+
+// =====================================================
+// ตัวแปรระบบ
+// =====================================================
+long duration;
+float distance = 0;
+
+String parkingStatus = "กำลังตรวจสอบ";
+
+unsigned long lastSendTime = 0;
+
+// จำนวนรถและช่องว่าง
+int occupiedSlots = 0;
+int availableSlots = TOTAL_SLOTS;
+
+
+// =====================================================
+// อ่านระยะทางจาก Ultrasonic
+// =====================================================
+float readDistance()
+{
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(TRIG_PIN, LOW);
+
+  duration = pulseIn(ECHO_PIN, HIGH, 30000);
+
+  if (duration == 0)
+  {
+    return -1;
+  }
+
+  distance = duration * 0.0343 / 2;
+
+  return distance;
+}
+
+
+// =====================================================
+// ส่งข้อมูลไป Google Sheets
+// =====================================================
+void sendToGoogleSheets(float d, String status)
+{
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("ไม่มี Internet");
+    return;
+  }
+
+  HTTPClient http;
+
+  String url = String(GOOGLE_SCRIPT_URL);
+
+  url += "?distance=";
+  url += String(d, 2);
+
+  // -------------------------------------------------
+  // ส่งสถานะเป็นภาษาอังกฤษ
+  // เพื่อป้องกันภาษาไทยกลายเป็นภาษาต่างดาว
+  // -------------------------------------------------
+
+  String statusEN;
+
+  if (status == "มีรถ")
+  {
+    statusEN = "occupied";
+  }
+  else if (status == "ช่องว่าง")
+  {
+    statusEN = "available";
+  }
+  else
+  {
+    statusEN = "no_echo";
+  }
+
+  url += "&status=";
+  url += statusEN;
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("ส่งข้อมูลไป Google Sheets...");
+  Serial.println("================================");
+
+  http.begin(url);
+
+  int httpCode = http.GET();
+
+  if (httpCode > 0)
+  {
+    Serial.print("Response: ");
+    Serial.println(httpCode);
+
+    String payload = http.getString();
+
+    Serial.print("Server: ");
+    Serial.println(payload);
+  }
+  else
+  {
+    Serial.print("Error: ");
+    Serial.println(http.errorToString(httpCode));
+  }
+
+  http.end();
+}
+
+
+// =====================================================
+// API ส่งข้อมูลให้ Dashboard
+// Dashboard จะเรียกทุก 1 วินาที
+// =====================================================
+void handleData()
+{
+  String json = "{";
+
+  json += "\"distance\":";
+  
+  if (distance < 0)
+  {
+    json += "null";
+  }
+  else
+  {
+    json += String(distance, 2);
+  }
+
+  json += ",";
+
+  json += "\"status\":\"";
+
+  if (parkingStatus == "มีรถ")
+  {
+    json += "occupied";
+  }
+  else if (parkingStatus == "ช่องว่าง")
+  {
+    json += "available";
+  }
+  else
+  {
+    json += "unknown";
+  }
+
+  json += "\",";
+
+  json += "\"occupied\":";
+  json += String(occupiedSlots);
+
+  json += ",";
+
+  json += "\"available\":";
+  json += String(availableSlots);
+
+  json += ",";
+
+  json += "\"total\":";
+  json += String(TOTAL_SLOTS);
+
+  json += "}";
+
+  server.send(
+    200,
+    "application/json; charset=UTF-8",
+    json
+  );
+}
+
+
+// =====================================================
+// หน้า Dashboard
+// =====================================================
+void handleRoot()
+{
+  String html = R"rawliteral(
+
+<!DOCTYPE html>
+
+<html lang="th">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1.0">
+
+<title>Smart Parking System</title>
+
+
+<style>
+
+/* =================================================
+   GLOBAL
+================================================= */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+
+  margin: 0;
+
+  font-family:
+    Arial,
+    "Noto Sans Thai",
+    sans-serif;
+
+  background:
+    linear-gradient(
+      135deg,
+      #0f172a,
+      #1e293b
+    );
+
+  color: white;
+
+  min-height: 100vh;
+
+}
+
+
+/* =================================================
+   MAIN CONTAINER
+================================================= */
+
+.container {
+
+  width: 92%;
+
+  max-width: 900px;
+
+  margin: auto;
+
+  padding:
+    25px
+    0
+    40px;
+
+}
+
+
+/* =================================================
+   HEADER
+================================================= */
+
+.header {
+
+  text-align: center;
+
+  padding: 15px;
+
+  margin-bottom: 20px;
+
+}
+
+.header h1 {
+
+  margin: 0;
+
+  font-size: 30px;
+
+  letter-spacing: 1px;
+
+}
+
+.header p {
+
+  margin-top: 8px;
+
+  color: #94a3b8;
+
+  font-size: 15px;
+
+}
+
+
+/* =================================================
+   CONNECTION STATUS
+================================================= */
+
+.connection {
+
+  display: inline-flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  margin-top: 12px;
+
+  padding:
+    7px
+    14px;
+
+  border-radius: 50px;
+
+  background:
+    rgba(34,197,94,0.12);
+
+  color: #4ade80;
+
+  font-size: 13px;
+
+}
+
+
+/* =================================================
+   CARD
+================================================= */
+
+.card {
+
+  background: #1e293b;
+
+  border-radius: 20px;
+
+  padding: 24px;
+
+  margin-bottom: 20px;
+
+  box-shadow:
+    0 10px 30px
+    rgba(0,0,0,0.25);
+
+}
+
+
+/* =================================================
+   SECTION TITLE
+================================================= */
+
+.section-title {
+
+  font-size: 18px;
+
+  font-weight: bold;
+
+  color: #e2e8f0;
+
+  margin-bottom: 20px;
+
+}
+
+
+/* =================================================
+   PARKING LOT
+================================================= */
+
+.parking-lot {
+
+  position: relative;
+
+  min-height: 270px;
+
+  border-radius: 15px;
+
+  padding: 30px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  overflow: hidden;
+
+  background:
+
+    repeating-linear-gradient(
+      90deg,
+      #334155 0px,
+      #334155 55px,
+      #3b4759 55px,
+      #3b4759 57px
+    );
+
+}
+
+
+/* =================================================
+   ROAD
+================================================= */
+
+.road-line {
+
+  position: absolute;
+
+  top: 20px;
+
+  bottom: 20px;
+
+  left: 50%;
+
+  border-left:
+    3px dashed
+    rgba(255,255,255,0.35);
+
+}
+
+
+/* =================================================
+   PARKING SLOT
+================================================= */
+
+.parking-slot {
+
+  position: relative;
+
+  width: 240px;
+
+  height: 190px;
+
+  border:
+    4px dashed
+    white;
+
+  border-radius: 12px;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  justify-content: center;
+
+  z-index: 2;
+
+  transition:
+    0.4s;
+
+}
+
+
+/* =================================================
+   AVAILABLE
+================================================= */
+
+.parking-slot.available {
+
+  background:
+    rgba(34,197,94,0.15);
+
+  border-color:
+    #22c55e;
+
+  box-shadow:
+    0 0 30px
+    rgba(34,197,94,0.25);
+
+}
+
+
+/* =================================================
+   OCCUPIED
+================================================= */
+
+.parking-slot.occupied {
+
+  background:
+    rgba(239,68,68,0.20);
+
+  border-color:
+    #ef4444;
+
+  box-shadow:
+    0 0 30px
+    rgba(239,68,68,0.30);
+
+}
+
+
+/* =================================================
+   UNKNOWN
+================================================= */
+
+.parking-slot.unknown {
+
+  background:
+    rgba(100,116,139,0.15);
+
+  border-color:
+    #64748b;
+
+}
+
+
+/* =================================================
+   SLOT NUMBER
+================================================= */
+
+.slot-number {
+
+  position: absolute;
+
+  top: 10px;
+
+  left: 12px;
+
+  font-size: 12px;
+
+  font-weight: bold;
+
+  color: #cbd5e1;
+
+}
+
+
+/* =================================================
+   PARKING SYMBOL
+================================================= */
+
+.parking-symbol {
+
+  font-size: 65px;
+
+  line-height: 1;
+
+}
+
+
+/* =================================================
+   CAR
+================================================= */
+
+.parking-car {
+
+  position: absolute;
+
+  font-size: 65px;
+
+  line-height: 1;
+
+  z-index: 10;
+
+  pointer-events: none;
+
+}
+
+
+/* =================================================
+   CAR ENTER
+   รถวิ่งจากซ้ายเข้ามาจอด
+================================================= */
+
+.car-enter {
+
+  left: -100px;
+
+  top: 50%;
+
+  transform:
+    translateY(-50%)
+    scaleX(-1);
+
+  animation:
+    carEnter
+    2.2s
+    cubic-bezier(.22,.61,.36,1)
+    forwards;
+
+}
+
+
+@keyframes carEnter {
+
+  0% {
+
+    left: -100px;
+
+    transform:
+      translateY(-50%)
+      scaleX(-1);
+
+  }
+
+  65% {
+
+    left: 42%;
+
+    transform:
+      translateY(-50%)
+      scaleX(-1);
+
+  }
+
+  82% {
+
+    left: 48%;
+
+    transform:
+      translateY(-50%)
+      scaleX(-1);
+
+  }
+
+  100% {
+
+    left: 50%;
+
+    transform:
+      translate(-50%, -50%)
+      scaleX(-1);
+
+  }
+
+}
+
+
+/* =================================================
+   CAR PARKED
+================================================= */
+
+.car-parked {
+
+  left: 50%;
+
+  top: 50%;
+
+  transform:
+    translate(-50%, -50%);
+
+}
+
+
+/* =================================================
+   CAR EXIT
+   รถวิ่งออกไปทางขวา
+================================================= */
+
+.car-exit {
+
+  left: 50%;
+
+  top: 50%;
+
+  transform:
+    translate(-50%, -50%);
+
+  animation:
+    carExit
+    1.8s
+    cubic-bezier(.55,.08,.68,.53)
+    forwards;
+
+}
+
+
+@keyframes carExit {
+
+  0% {
+
+    left: 50%;
+
+    transform:
+      translate(-50%, -50%)
+      scaleX(-1);
+
+  }
+
+  30% {
+
+    left: 55%;
+
+    transform:
+      translate(-50%, -50%)
+      scaleX(-1);
+
+  }
+
+  100% {
+
+    left: calc(100% + 100px);
+
+    transform:
+      translateY(-50%)
+      scaleX(-1);
+
+  }
+
+}
+
+
+/* =================================================
+   PARKING STATUS
+================================================= */
+
+.slot-status {
+
+  font-size: 18px;
+
+  font-weight: bold;
+
+  margin-top: 10px;
+
+}
+
+
+/* =================================================
+   STATISTICS
+================================================= */
+
+.stats {
+
+  display: grid;
+
+  grid-template-columns:
+    repeat(3, 1fr);
+
+  gap: 15px;
+
+  margin-bottom: 20px;
+
+}
+
+
+.stat-card {
+
+  background:
+    #1e293b;
+
+  border-radius:
+    18px;
+
+  padding:
+    20px;
+
+  text-align:
+    center;
+
+  box-shadow:
+    0 8px 20px
+    rgba(0,0,0,0.20);
+
+}
+
+
+.stat-icon {
+
+  font-size: 30px;
+
+  margin-bottom: 8px;
+
+}
+
+
+.stat-number {
+
+  font-size: 32px;
+
+  font-weight: bold;
+
+  margin: 5px 0;
+
+}
+
+
+.stat-label {
+
+  color:
+    #94a3b8;
+
+  font-size:
+    14px;
+
+}
+
+
+/* =================================================
+   STATUS CARD
+================================================= */
+
+.status-card {
+
+  background:
+    #1e293b;
+
+  border-radius:
+    18px;
+
+  padding:
+    24px;
+
+  margin-bottom:
+    20px;
+
+  box-shadow:
+    0 8px 20px
+    rgba(0,0,0,0.20);
+
+}
+
+
+.status-header {
+
+  display:
+    flex;
+
+  justify-content:
+    space-between;
+
+  align-items:
+    center;
+
+  gap:
+    10px;
+
+  margin-bottom:
+    20px;
+
+}
+
+
+.status-title {
+
+  font-size:
+    18px;
+
+  color:
+    #cbd5e1;
+
+}
+
+
+.status-badge {
+
+  padding:
+    8px
+    15px;
+
+  border-radius:
+    50px;
+
+  font-weight:
+    bold;
+
+  color:
+    white;
+
+  transition:
+    0.3s;
+
+}
+
+
+.status-badge.occupied {
+
+  background:
+    #ef4444;
+
+}
+
+
+.status-badge.available {
+
+  background:
+    #22c55e;
+
+}
+
+
+.status-badge.unknown {
+
+  background:
+    #64748b;
+
+}
+
+
+.status-main {
+
+  font-size:
+    26px;
+
+  font-weight:
+    bold;
+
+  margin-bottom:
+    18px;
+
+}
+
+
+/* =================================================
+   DISTANCE BOX
+================================================= */
+
+.distance-box {
+
+  background:
+    #0f172a;
+
+  border-radius:
+    12px;
+
+  padding:
+    15px;
+
+  display:
+    flex;
+
+  justify-content:
+    space-between;
+
+  align-items:
+    center;
+
+}
+
+
+.distance-label {
+
+  color:
+    #94a3b8;
+
+  font-size:
+    14px;
+
+}
+
+
+.distance-value {
+
+  font-size:
+    25px;
+
+  font-weight:
+    bold;
+
+}
+
+
+/* =================================================
+   WIFI CARD
+================================================= */
+
+.wifi-info {
+
+  display:
+    grid;
+
+  grid-template-columns:
+    1fr 1fr;
+
+  gap:
+    15px;
+
+}
+
+
+.wifi-box {
+
+  background:
+    #0f172a;
+
+  padding:
+    15px;
+
+  border-radius:
+    12px;
+
+}
+
+
+.wifi-label {
+
+  color:
+    #64748b;
+
+  font-size:
+    12px;
+
+  margin-bottom:
+    5px;
+
+}
+
+
+.wifi-value {
+
+  color:
+    #e2e8f0;
+
+  font-weight:
+    bold;
+
+  word-break:
+    break-word;
+
+}
+
+
+/* =================================================
+   FOOTER
+================================================= */
+
+.footer {
+
+  text-align:
+    center;
+
+  color:
+    #64748b;
+
+  font-size:
+    12px;
+
+  margin-top:
+    25px;
+
+  line-height:
+    1.7;
+
+}
+
+
+/* =================================================
+   ANIMATION STATUS
+================================================= */
+
+.status-main.changed {
+
+  animation:
+    statusPop
+    0.5s
+    ease;
+
+}
+
+
+@keyframes statusPop {
+
+  0% {
+
+    transform:
+      scale(0.8);
+
+    opacity:
+      0.3;
+
+  }
+
+  100% {
+
+    transform:
+      scale(1);
+
+    opacity:
+      1;
+
+  }
+
+}
+
+
+/* =================================================
+   MOBILE
+================================================= */
+
+@media (max-width: 600px) {
+
+  .container {
+
+    width:
+      94%;
+
+  }
+
+
+  .header h1 {
+
+    font-size:
+      23px;
+
+  }
+
+
+  .stats {
+
+    grid-template-columns:
+      1fr;
+
+  }
+
+
+  .parking-slot {
+
+    width:
+      200px;
+
+    height:
+      165px;
+
+  }
+
+
+  .parking-car {
+
+    font-size:
+      52px;
+
+  }
+
+
+  .parking-symbol {
+
+    font-size:
+      52px;
+
+  }
+
+
+  .wifi-info {
+
+    grid-template-columns:
+      1fr;
+
+  }
+
+
+  .status-header {
+
+    flex-direction:
+      column;
+
+    align-items:
+      flex-start;
+
+  }
+
+}
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<div class="container">
+
+
+<!-- =================================================
+     HEADER
+================================================= -->
+
+<div class="header">
+
+  <h1>
+    🚗 SMART PARKING SYSTEM
+  </h1>
+
+  <p>
+    ระบบตรวจสอบพื้นที่จอดรถอัจฉริยะ
+  </p>
+
+  <div class="connection">
+    🟢 ESP32 ONLINE
+  </div>
+
+</div>
+
+
+<!-- =================================================
+     PARKING AREA
+================================================= -->
+
+<div class="card">
+
+  <div class="section-title">
+    🅿️ สถานะพื้นที่จอดรถ
+  </div>
+
+  <div class="parking-lot" id="parkingLot">
+
+    <div class="road-line"></div>
+
+    <div
+      class="parking-slot available"
+      id="parkingSlot">
+
+      <div class="slot-number">
+        SLOT 01
+      </div>
+
+      <div
+        class="parking-symbol"
+        id="parkingSymbol">
+        🅿️
+      </div>
+
+      <div
+        class="slot-status"
+        id="slotStatus">
+        ช่องว่าง
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<!-- =================================================
+     STATISTICS
+================================================= -->
+
+<div class="stats">
+
+
+  <div class="stat-card">
+
+    <div class="stat-icon">
+      🚗
+    </div>
+
+    <div
+      class="stat-number"
+      id="occupiedCount">
+      0
+    </div>
+
+    <div class="stat-label">
+      รถที่จอด
+    </div>
+
+  </div>
+
+
+  <div class="stat-card">
+
+    <div class="stat-icon">
+      🅿️
+    </div>
+
+    <div
+      class="stat-number"
+      id="availableCount">
+      1
+    </div>
+
+    <div class="stat-label">
+      ช่องว่าง
+    </div>
+
+  </div>
+
+
+  <div class="stat-card">
+
+    <div class="stat-icon">
+      📊
+    </div>
+
+    <div
+      class="stat-number"
+      id="totalCount">
+      1
+    </div>
+
+    <div class="stat-label">
+      ช่องทั้งหมด
+    </div>
+
+  </div>
+
+
+</div>
+
+
+<!-- =================================================
+     CURRENT STATUS
+================================================= -->
+
+<div class="status-card">
+
+
+  <div class="status-header">
+
+    <div class="status-title">
+      📡 สถานะปัจจุบัน
+    </div>
+
+    <div
+      class="status-badge available"
+      id="statusBadge">
+
+      🅿️ ช่องว่าง
+
+    </div>
+
+  </div>
+
+
+  <div
+    class="status-main"
+    id="statusMain">
+
+    ช่องว่าง
+
+  </div>
+
+
+  <div class="distance-box">
+
+    <div>
+
+      <div class="distance-label">
+        ระยะห่างจากเซนเซอร์
+      </div>
+
+    </div>
+
+    <div
+      class="distance-value"
+      id="distanceValue">
+
+      --
+
+    </div>
+
+  </div>
+
+
+</div>
+
+
+<!-- =================================================
+     WIFI INFORMATION
+================================================= -->
+
+<div class="card">
+
+  <div class="section-title">
+    📡 ข้อมูลการเชื่อมต่อ
+  </div>
+
+
+  <div class="wifi-info">
+
+
+    <div class="wifi-box">
+
+      <div class="wifi-label">
+        Wi-Fi Access Point
+      </div>
+
+      <div class="wifi-value">
+        ctd_eiei
+      </div>
+
+    </div>
+
+
+    <div class="wifi-box">
+
+      <div class="wifi-label">
+        Dashboard IP
+      </div>
+
+      <div class="wifi-value">
+        192.168.4.1
+      </div>
+
+    </div>
+
+
+  </div>
+
+</div>
+
+
+<!-- =================================================
+     FOOTER
+================================================= -->
+
+<div class="footer">
+
+  ESP32 Smart Parking System<br>
+
+  Dashboard อัปเดตแบบ Real-time<br>
+
+  Google Sheets บันทึกข้อมูลทุก 10 วินาที
+
+</div>
+
+
+</div>
+
+
+<script>
+
+/* =====================================================
+   ตัวแปรสถานะ
+===================================================== */
+
+let lastStatus = null;
+
+let animationTimer = null;
+
+
+/* =====================================================
+   ฟังก์ชันแสดงรถเข้าจอด
+===================================================== */
+
+function carEnterParking() {
+
+  const lot = document.getElementById("parkingLot");
+  const slot = document.getElementById("parkingSlot");
+
+  // ล้าง Animation เดิม
+  const oldCar = document.getElementById("animatedCar");
+
+  if (oldCar) {
+    oldCar.remove();
+  }
+
+  // เปลี่ยนช่องเป็นสีแดง
+  slot.className =
+    "parking-slot occupied";
+
+  // เอาสัญลักษณ์ P ออก
+  document.getElementById("parkingSymbol").style.display =
+    "none";
+
+  document.getElementById("slotStatus").innerText =
+    "มีรถ";
+
+  // สร้างรถ
+  const car = document.createElement("div");
+
+  car.id = "animatedCar";
+
+  car.className =
+    "parking-car car-enter";
+
+  car.innerText =
+    "🚗";
+
+  lot.appendChild(car);
+
+
+  // หลัง Animation จบ
+  clearTimeout(animationTimer);
+
+  animationTimer = setTimeout(function() {
+
+    car.className =
+      "parking-car car-parked";
+
+  }, 2200);
+
+}
+
+
+/* =====================================================
+   ฟังก์ชันแสดงรถออกจากลาน
+===================================================== */
+
+function carExitParking() {
+
+  const car =
+    document.getElementById("animatedCar");
+
+  const slot =
+    document.getElementById("parkingSlot");
+
+  // ถ้ามีรถอยู่ ให้เล่น Animation ออก
+  if (car) {
+
+    car.className =
+      "parking-car car-exit";
+
+    clearTimeout(animationTimer);
+
+    animationTimer = setTimeout(function() {
+
+      car.remove();
+
+      showEmptySlot();
+
+    }, 1800);
+
+  }
+  else {
+
+    showEmptySlot();
+
+  }
+
+}
+
+
+/* =====================================================
+   แสดงช่องว่าง
+===================================================== */
+
+function showEmptySlot() {
+
+  const slot =
+    document.getElementById("parkingSlot");
+
+  slot.className =
+    "parking-slot available";
+
+
+  const symbol =
+    document.getElementById("parkingSymbol");
+
+  symbol.style.display =
+    "block";
+
+  symbol.innerText =
+    "🅿️";
+
+
+  document.getElementById("slotStatus").innerText =
+    "ช่องว่าง";
+
+}
+
+
+/* =====================================================
+   แสดงสถานะ Unknown
+===================================================== */
+
+function showUnknownSlot() {
+
+  const car =
+    document.getElementById("animatedCar");
+
+  if (car) {
+
+    car.remove();
+
+  }
+
+
+  const slot =
+    document.getElementById("parkingSlot");
+
+  slot.className =
+    "parking-slot unknown";
+
+
+  const symbol =
+    document.getElementById("parkingSymbol");
+
+  symbol.style.display =
+    "block";
+
+  symbol.innerText =
+    "⚠️";
+
+
+  document.getElementById("slotStatus").innerText =
+    "ไม่ทราบสถานะ";
+
+}
+
+
+/* =====================================================
+   อัปเดต Dashboard
+===================================================== */
+
+function updateDashboard(data) {
+
+  const status =
+    data.status;
+
+
+  /* -----------------------------------------------
+     Distance
+  ------------------------------------------------ */
+
+  const distance =
+    document.getElementById("distanceValue");
+
+
+  if (data.distance === null) {
+
+    distance.innerText =
+      "--";
+
+  }
+  else {
+
+    distance.innerText =
+      data.distance.toFixed(2) + " cm";
+
+  }
+
+
+  /* -----------------------------------------------
+     Statistics
+  ------------------------------------------------ */
+
+  document.getElementById(
+    "occupiedCount"
+  ).innerText =
+    data.occupied;
+
+
+  document.getElementById(
+    "availableCount"
+  ).innerText =
+    data.available;
+
+
+  document.getElementById(
+    "totalCount"
+  ).innerText =
+    data.total;
+
+
+  /* -----------------------------------------------
+     Status
+  ------------------------------------------------ */
+
+  const badge =
+    document.getElementById("statusBadge");
+
+  const main =
+    document.getElementById("statusMain");
+
+
+  if (status === "occupied") {
+
+    badge.className =
+      "status-badge occupied";
+
+    badge.innerText =
+      "🚗 มีรถ";
+
+    main.innerText =
+      "มีรถ";
+
+
+  }
+  else if (status === "available") {
+
+    badge.className =
+      "status-badge available";
+
+    badge.innerText =
+      "🅿️ ช่องว่าง";
+
+    main.innerText =
+      "ช่องว่าง";
+
+
+  }
+  else {
+
+    badge.className =
+      "status-badge unknown";
+
+    badge.innerText =
+      "⚠️ ไม่ทราบสถานะ";
+
+    main.innerText =
+      "ไม่สามารถอ่านค่าได้";
+
+  }
+
+
+  /* -----------------------------------------------
+     Animation
+  ------------------------------------------------ */
+
+  if (lastStatus !== null) {
+
+    // ช่องว่าง -> มีรถ
+    if (
+      lastStatus === "available" &&
+      status === "occupied"
+    ) {
+
+      carEnterParking();
+
+    }
+
+
+    // มีรถ -> ช่องว่าง
+    else if (
+      lastStatus === "occupied" &&
+      status === "available"
+    ) {
+
+      carExitParking();
+
+    }
+
+
+    // สถานะเปลี่ยนเป็น Unknown
+    else if (
+      status === "unknown"
+    ) {
+
+      showUnknownSlot();
+
+    }
+
+  }
+  else {
+
+    // ครั้งแรกที่เปิด Dashboard
+
+    if (status === "occupied") {
+
+      // ถ้าเปิดมาแล้วมีรถ
+      // ให้รถวิ่งเข้าจอดเลย
+      carEnterParking();
+
+    }
+
+    else if (status === "available") {
+
+      showEmptySlot();
+
+    }
+
+    else {
+
+      showUnknownSlot();
+
+    }
+
+  }
+
+
+  /* -----------------------------------------------
+     Animation ข้อความสถานะ
+  ------------------------------------------------ */
+
+  if (lastStatus !== status) {
+
+    main.classList.remove("changed");
+
+    void main.offsetWidth;
+
+    main.classList.add("changed");
+
+  }
+
+
+  lastStatus =
+    status;
+
+}
+
+
+/* =====================================================
+   ดึงข้อมูลจาก ESP32
+===================================================== */
+
+async function fetchData() {
+
+  try {
+
+    const response =
+      await fetch(
+        "/data",
+        {
+          cache: "no-store"
+        }
+      );
+
+
+    if (!response.ok) {
+
+      throw new Error(
+        "Server Error"
+      );
+
+    }
+
+
+    const data =
+      await response.json();
+
+
+    updateDashboard(data);
+
+
+  }
+  catch (error) {
+
+    console.log(
+      "ไม่สามารถเชื่อมต่อ ESP32"
+    );
+
+  }
+
+}
+
+
+/* =====================================================
+   เริ่มต้น
+===================================================== */
+
+fetchData();
+
+
+/* =====================================================
+   อัปเดตทุก 1 วินาที
+===================================================== */
+
+setInterval(
+  fetchData,
+  1000
+);
+
+</script>
+
+
+</body>
+
+</html>
+
+)rawliteral";
+
+
+  // ===================================================
+  // ส่งหน้าเว็บ
+  // ===================================================
+
+  server.send(
+    200,
+    "text/html; charset=UTF-8",
+    html
+  );
+}
+
+
+// =====================================================
+// SETUP
+// =====================================================
+void setup()
+{
+  Serial.begin(115200);
+
+
+  // ===================================================
+  // ตั้งค่า GPIO
+  // ===================================================
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  pinMode(LED_BLUE, OUTPUT);
+  pinMode(LED_RED, OUTPUT);
+
+  digitalWrite(LED_BLUE, LOW);
+  digitalWrite(LED_RED, LOW);
+
+
+  // ===================================================
+  // Wi-Fi AP + STA
+  // ===================================================
+
+  WiFi.mode(WIFI_AP_STA);
+
+
+  // ===================================================
+  // เชื่อม Wi-Fi ที่มี Internet
+  // ===================================================
+
+  WiFi.begin(
+    WIFI_SSID,
+    WIFI_PASSWORD
+  );
+
+  Serial.print(
+    "กำลังเชื่อม Wi-Fi"
+  );
+
+  int count = 0;
+
+  while (
+    WiFi.status() != WL_CONNECTED &&
+    count < 20
+  )
+  {
+    delay(500);
+
+    Serial.print(".");
+
+    count++;
+  }
+
+  Serial.println();
+
+
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    Serial.println(
+      "เชื่อม Wi-Fi สำเร็จ"
+    );
+
+    Serial.print(
+      "Internet IP: "
+    );
+
+    Serial.println(
+      WiFi.localIP()
+    );
+  }
+  else
+  {
+    Serial.println(
+      "ไม่สามารถเชื่อม Wi-Fi Internet ได้"
+    );
+  }
+
+
+  // ===================================================
+  // เปิด Access Point
+  // ===================================================
+
+  WiFi.softAP(
+    AP_SSID,
+    AP_PASSWORD
+  );
+
+  Serial.println();
+
+  Serial.println(
+    "ESP32 Access Point เปิดแล้ว"
+  );
+
+  Serial.print(
+    "AP SSID: "
+  );
+
+  Serial.println(
+    AP_SSID
+  );
+
+  Serial.print(
+    "AP IP: "
+  );
+
+  Serial.println(
+    WiFi.softAPIP()
+  );
+
+
+  // ===================================================
+  // Web Server
+  // ===================================================
+
+  server.on(
+    "/",
+    handleRoot
+  );
+
+  // API สำหรับ Dashboard
+  server.on(
+    "/data",
+    handleData
+  );
+
+  server.begin();
+
+  Serial.println(
+    "Web Server Started"
+  );
+
+  Serial.println(
+    "================================"
+  );
+}
+
+
+// =====================================================
+// LOOP
+// =====================================================
+void loop()
+{
+  // ===================================================
+  // รับ Request จาก Browser
+  // ===================================================
+
+  server.handleClient();
+
+
+  // ===================================================
+  // อ่านระยะ
+  // ===================================================
+
+  float d = readDistance();
+
+
+  // ===================================================
+  // ตรวจสอบสถานะ
+  // ===================================================
+
+  if (d < 0)
+  {
+    parkingStatus = "No Echo";
+
+    occupiedSlots = 0;
+
+    availableSlots =
+      TOTAL_SLOTS;
+
+    digitalWrite(
+      LED_RED,
+      LOW
+    );
+
+    digitalWrite(
+      LED_BLUE,
+      LOW
+    );
+  }
+
+  else if (d <= CAR_DISTANCE)
+  {
+    parkingStatus = "มีรถ";
+
+    occupiedSlots = 1;
+
+    availableSlots =
+      TOTAL_SLOTS - occupiedSlots;
+
+    digitalWrite(
+      LED_RED,
+      HIGH
+    );
+
+    digitalWrite(
+      LED_BLUE,
+      LOW
+    );
+  }
+
+  else
+  {
+    parkingStatus = "ช่องว่าง";
+
+    occupiedSlots = 0;
+
+    availableSlots =
+      TOTAL_SLOTS;
+
+    digitalWrite(
+      LED_RED,
+      LOW
+    );
+
+    digitalWrite(
+      LED_BLUE,
+      HIGH
+    );
+  }
+
+
+  // ===================================================
+  // Serial Monitor
+  // ===================================================
+
+  Serial.print(
+    "Distance: "
+  );
+
+
+  if (d < 0)
+  {
+    Serial.println(
+      "No Echo"
+    );
+  }
+
+  else
+  {
+    Serial.print(
+      d
+    );
+
+    Serial.print(
+      " cm"
+    );
+
+    Serial.print(
+      " | สถานะ: "
+    );
+
+    Serial.println(
+      parkingStatus
+    );
+  }
+
+
+  // ===================================================
+  // ส่ง Google Sheets ทุก 10 วินาที
+  // ===================================================
+
+  if (
+    millis() - lastSendTime >= 10000
+  )
+  {
+    lastSendTime =
+      millis();
+
+    sendToGoogleSheets(
+      d,
+      parkingStatus
+    );
+  }
+
+
+  // ===================================================
+  // หน่วงเวลา
+  // ===================================================
+
+  delay(500);
+}
